@@ -38,18 +38,10 @@ class Service(SocketService):
 
         workers = self._get_worker_data()
 
-        if getattr(self, 'definitions', None) is None:
-            self.definitions = {}
-
-        if getattr(self, 'order', None) is None:
-            self.order = []
-
         total = {}
 
         for worker in workers:
             total.update(self._build_worker(worker))
-            if worker[0] not in self.order:
-                self.order.append(worker[0])
 
         return total
 
