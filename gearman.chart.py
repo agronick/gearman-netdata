@@ -9,26 +9,29 @@ from bases.FrameworkServices.SocketService import SocketService
 
 class Service(SocketService):
     def __init__(self, configuration=None, name=None):
-        SocketService.__init__(self, configuration=configuration, name=name)
+        super(Service, self).__init__(configuration=configuration, name=name)
         self.request = "status\n"
         self._keep_alive = True
-
-    def create(self):
         self.order = []
         self.definitions = {}
 
+    def create(self):
+
         for worker in sorted([row[0] for row in self._get_worker_data()]):
-            self.order.append(worker)
-            self.definitions[worker] = {
-                'options': [None, worker, 'workers', 'workers', 'gearman.' + worker, 'stacked'],
-                'lines': [
-                    [worker + '_queued', 'Queued', 'absolute'],
-                    [worker + '_idle', 'Idle', 'absolute'],
-                    [worker + '_active', 'Active', 'absolute'],
-                ]
-            }
+            self._add_worker_to_chart(worker)
 
         return super(Service, self).create()
+
+    def _add_worker_to_chart(self, worker):
+        self.order.append(worker)
+        self.definitions[worker] = {
+            'options': [None, worker, 'workers', 'workers', 'gearman.' + worker, 'stacked'],
+            'lines': [
+                [worker + '_queued', 'Queued', 'absolute'],
+                [worker + '_idle', 'Idle', 'absolute'],
+                [worker + '_active', 'Active', 'absolute'],
+            ]
+        }
 
     def _get_data(self):
         """
@@ -55,7 +58,7 @@ class Service(SocketService):
             self.debug("Gearman returned no data")
             return None
 
-        return [worker.split() for worker in raw.splitlines() if '.' not in worker]
+        return [worker.split() for worker in raw.splitlines()][:-1]
 
     def _build_worker(self, worker):
 
