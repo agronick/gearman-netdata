@@ -1,8 +1,7 @@
-# Description: dovecot netdata python.d module
+# Description: Gearman netdata python.d module
 # Author: Kyle Agronick
 # SPDX-License-Identifier: GPL-3.0+
 
-# Gearman Netdata Plugin
 
 from bases.FrameworkServices.SocketService import SocketService
 
