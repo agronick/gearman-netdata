@@ -17,7 +17,7 @@ class Service(SocketService):
         self.order = []
         self.definitions = {}
 
-        for worker in [row[0] for row in self._get_worker_data()]:
+        for worker in sorted([row[0] for row in self._get_worker_data()]):
             self.order.append(worker)
             self.definitions[worker] = {
                 'options': [None, worker, 'workers', 'workers', 'gearman.' + worker, 'stacked'],
