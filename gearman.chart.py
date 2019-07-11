@@ -7,6 +7,10 @@
 from bases.FrameworkServices.SocketService import SocketService
 from copy import deepcopy
 
+update_every = 3
+priority = 60500
+
+
 CHARTS = {
     'workers': {
         'options': [None, 'Total Workers', 'workers', 'workers', 'gearman.workers', 'stacked'],
@@ -21,12 +25,20 @@ CHARTS = {
 
 class Service(SocketService):
     def __init__(self, configuration=None, name=None):
-        Service.__init__(configuration=configuration, name=name)
+        SocketService.__init__(self, configuration=configuration, name=name)
         self.request = "status\n"
         self._keep_alive = True
 
-        self.definitions = deepcopy(CHARTS) if not self.configuration.get('hide_total') else {}
+        self.host = self.configuration.get('host', 'localhost')
+        self.port = self.configuration.get('port', 4730)
+
+        self.hide_total = self.configuration.get('hide_total')
+        self.definitions = deepcopy(CHARTS) if not self.hide_total else {}
         self.monitor_jobs = self.configuration.get('jobs', [])
+
+        if self.configuration.get('autodetect_jobs', len(self.monitor_jobs) == 0):
+            self._auto_add_jobs()
+
         self.order = ['workers'] + self.monitor_jobs
 
         for job in self.monitor_jobs:
@@ -39,6 +51,22 @@ class Service(SocketService):
                     ['{0}_active'.format(job), 'Active', 'absolute'],
                 ]
             }
+
+    def _auto_add_jobs(self):
+
+        """
+        Get a list of active jobs from Gearman
+        and make tables for them
+        :return: None
+        """
+
+        tasks = sorted([task[0] for task in self._get_worker_data() if any(task[1:])])
+
+        # Don't make a per-task table if there is only one task - it would be redundant
+        if len(tasks) > 1:
+            for task in tasks:
+                if task not in self.monitor_jobs:
+                    self.monitor_jobs.append(task)
 
     def _get_data(self):
         """
@@ -60,8 +88,9 @@ class Service(SocketService):
             if job_name in self.monitor_jobs:
                 output.update(job_data)
 
-            for sum_value in ('queued', 'idle', 'active'):
-                output['total_{0}'.format(sum_value)] += job_data['{0}_{1}'.format(job_name, sum_value)]
+            if not self.hide_total:
+                for sum_value in ('queued', 'idle', 'active'):
+                    output['total_{0}'.format(sum_value)] += job_data['{0}_{1}'.format(job_name, sum_value)]
 
         return output
 
