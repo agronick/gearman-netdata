@@ -1,5 +1,5 @@
 # Description: dovecot netdata python.d module
-# Author: Kyle Agronick
+# Author: Kyle Agronick (agronick)
 # SPDX-License-Identifier: GPL-3.0+
 
 # Gearman Netdata Plugin
@@ -23,50 +23,29 @@ CHARTS = {
 }
 
 
+def job_chart_template(job_name):
+    return {
+        'options': [None, job_name, 'workers', 'workers', 'gearman.{0}'.format(job_name), 'stacked'],
+        'lines': [
+            ['{0}_queued'.format(job_name), 'Queued', 'absolute'],
+            ['{0}_idle'.format(job_name), 'Idle', 'absolute'],
+            ['{0}_active'.format(job_name), 'Active', 'absolute'],
+        ]
+    }
+
+
 class Service(SocketService):
     def __init__(self, configuration=None, name=None):
-        SocketService.__init__(self, configuration=configuration, name=name)
+        super(Service, self).__init__(configuration=configuration, name=name)
         self.request = "status\n"
         self._keep_alive = True
 
         self.host = self.configuration.get('host', 'localhost')
         self.port = self.configuration.get('port', 4730)
 
-        self.hide_total = self.configuration.get('hide_total')
-        self.definitions = deepcopy(CHARTS) if not self.hide_total else {}
-        self.monitor_jobs = self.configuration.get('jobs', [])
-
-        if self.configuration.get('autodetect_jobs', len(self.monitor_jobs) == 0):
-            self._auto_add_jobs()
-
-        self.order = ['workers'] + self.monitor_jobs
-
-        for job in self.monitor_jobs:
-            self.order.append(job)
-            self.definitions[job] = {
-                'options': [None, job, 'workers', 'workers', 'gearman.{0}'.format(job), 'stacked'],
-                'lines': [
-                    ['{0}_queued'.format(job), 'Queued', 'absolute'],
-                    ['{0}_idle'.format(job), 'Idle', 'absolute'],
-                    ['{0}_active'.format(job), 'Active', 'absolute'],
-                ]
-            }
-
-    def _auto_add_jobs(self):
-
-        """
-        Get a list of active jobs from Gearman
-        and make tables for them
-        :return: None
-        """
-
-        tasks = sorted([task[0] for task in self._get_worker_data() if any(task[1:])])
-
-        # Don't make a per-task table if there is only one task - it would be redundant
-        if len(tasks) > 1:
-            for task in tasks:
-                if task not in self.monitor_jobs:
-                    self.monitor_jobs.append(task)
+        self.active_jobs = set()
+        self.definitions = deepcopy(CHARTS)
+        self.order = ['workers']
 
     def _get_data(self):
         """
@@ -74,21 +53,27 @@ class Service(SocketService):
         :return: dict
         """
 
-        jobs = self._get_worker_data()
-
         output = {
             'total_queued': 0,
             'total_idle': 0,
             'total_active': 0,
         }
 
-        for job in jobs:
-            job_data = self._build_job(job)
+        for job in self._get_worker_data():
             job_name = job[0]
-            if job_name in self.monitor_jobs:
+
+            has_data = any(job[1:])
+            if job_name in self.active_jobs and not has_data:
+                self._remove_chart(job_name)
+
+            elif has_data:
+
+                if job_name not in self.active_jobs:
+                    self._add_chart(job_name)
+
+                job_data = self._build_job(job)
                 output.update(job_data)
 
-            if not self.hide_total:
                 for sum_value in ('queued', 'idle', 'active'):
                     output['total_{0}'.format(sum_value)] += job_data['{0}_{1}'.format(job_name, sum_value)]
 
@@ -103,13 +88,15 @@ class Service(SocketService):
         try:
             raw = self._get_raw_data()
         except (ValueError, AttributeError):
-            return None
+            return
 
         if raw is None:
             self.debug("Gearman returned no data")
-            return None
+            return
 
-        return [job.split() for job in raw.splitlines()][:-1]
+        for line in sorted([job.split() for job in raw.splitlines()][:-1], key=lambda x: x[0]):
+            line[1:] = map(int, line[1:])
+            yield line
 
     def _build_job(self, job):
         """
@@ -117,7 +104,7 @@ class Service(SocketService):
         :return: dict
         """
 
-        total, running, available = map(int, job[1:])
+        total, running, available = job[1:]
 
         idle = available - running
         pending = total - running
@@ -127,5 +114,16 @@ class Service(SocketService):
             '{0}_idle'.format(job[0]): idle,
             '{0}_active'.format(job[0]): running,
         }
+
+    def _add_chart(self, job_name):
+        job_key = 'job_{0}'.format(job_name)
+        template = job_chart_template(job_name)
+        new_chart = self.charts.add_chart([job_key] + template['options'])
+        for dimension in template['lines']:
+            new_chart.add_dimension(dimension)
+
+    def _remove_chart(self, job_name):
+        job_key = 'job_{0}'.format(job_name)
+        self.charts[job_key].obsolete()
 
 
